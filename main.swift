@@ -1,7 +1,7 @@
 // StudyTimer - simple menu bar stopwatch for studying, with a break timer
 // Left click: start study / switch to break / switch back to study
 // Right click: menu (Study & Break totals, Reset, Stop, Quit)
-// No window, no Dock icon, no double-click reset.
+// No window (menu bar + Dock icon for easy relaunch), no double-click reset.
 import Cocoa
 import ServiceManagement
 
@@ -239,83 +239,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var cal = Calendar(identifier: .gregorian)
         cal.firstWeekday = 2 // Monday
         let now = Date()
-        let todayStart = cal.startOfDay(for: now)
 
-        let dayLabel: DateFormatter = {
-            let f = DateFormatter()
-            f.calendar = Calendar(identifier: .gregorian)
-            f.locale = Locale(identifier: "en_US_POSIX")
-            f.dateFormat = "M/d"
-            return f
-        }()
-        let weekdayNames = ["日", "月", "火", "水", "木", "金", "土"] // index: weekday-1 (1=Sun)
-
-        // Last 14 days, oldest first
-        var days: [(label: String, study: Int, brk: Int)] = []
-        for i in stride(from: 13, through: 0, by: -1) {
-            let day = cal.date(byAdding: .day, value: -i, to: todayStart)!
-            let key = dateFormatter.string(from: day)
-            let wd = cal.component(.weekday, from: day)
-            days.append((label: "\(dayLabel.string(from: day)) (\(weekdayNames[wd - 1]))",
-                         study: dailyTotals[key, default: 0],
-                         brk: dailyBreakTotals[key, default: 0]))
-        }
-        let maxStudy = max(days.map { $0.study }.max() ?? 0, 1)
-
-        var barsHTML = ""
-        for d in days {
-            let pct = Int((Double(d.study) / Double(maxStudy) * 100).rounded())
-            barsHTML += """
-            <div class="bar-row"><span class="bar-label">\(d.label)</span><div class="bar-track"><div class="bar-fill" style="width:\(pct)%"></div></div><span class="bar-value">\(formatTotal(d.study))</span></div>
-            """
-        }
-
-        var rowsHTML = ""
-        for d in days.reversed() {
-            rowsHTML += "<tr><td>\(d.label)</td><td>\(formatTotal(d.study))</td><td>\(formatTotal(d.brk))</td></tr>\n"
-        }
-
-        // Last 8 weeks (Monday start), oldest first
-        let thisWeekStart = cal.dateInterval(of: .weekOfYear, for: now)!.start
-        var weeks: [(label: String, study: Int)] = []
-        for w in stride(from: 7, through: 0, by: -1) {
-            let start = cal.date(byAdding: .day, value: -7 * w, to: thisWeekStart)!
-            var sum = 0
-            for d in 0..<7 {
-                let day = cal.date(byAdding: .day, value: d, to: start)!
-                sum += dailyTotals[dateFormatter.string(from: day), default: 0]
-            }
-            weeks.append((label: "\(dayLabel.string(from: start))〜", study: sum))
-        }
-        let maxWeek = max(weeks.map { $0.study }.max() ?? 0, 1)
-        var weeksHTML = ""
-        for wk in weeks {
-            let pct = Int((Double(wk.study) / Double(maxWeek) * 100).rounded())
-            weeksHTML += """
-            <div class="bar-row"><span class="bar-label">\(wk.label)</span><div class="bar-track"><div class="bar-fill week" style="width:\(pct)%"></div></div><span class="bar-value">\(formatTotal(wk.study))</span></div>
-            """
-        }
-
-        // Donut: today's study vs break
-        let donutHTML: String = {
-            let s = totalForToday()
-            let b = breakTotalForToday()
-            let total = s + b
-            let circ = 339.292 // 2 * pi * 54
-            if total == 0 {
-                return """
-                <div class="donut-wrap"><svg width="180" height="180" viewBox="0 0 180 180"><circle cx="90" cy="90" r="54" fill="none" stroke="#e9e9ee" stroke-width="22"/></svg><div class="donut-legend"><div>今日はまだ記録がありません</div></div></div>
-                """
-            }
-            let frac = Double(s) / Double(total)
-            let studyLen = frac * circ
-            let studyPct = Int((frac * 100).rounded())
-            return """
-            <div class="donut-wrap"><svg width="180" height="180" viewBox="0 0 180 180"><circle cx="90" cy="90" r="54" fill="none" stroke="#f2a541" stroke-width="22"/><circle cx="90" cy="90" r="54" fill="none" stroke="#3a7bd5" stroke-width="22" stroke-dasharray="\(studyLen) \(circ)" transform="rotate(-90 90 90)"/><text x="90" y="86" text-anchor="middle" font-size="20" font-weight="700" fill="currentColor">\(formatTotal(total))</text><text x="90" y="108" text-anchor="middle" font-size="11" fill="#888">今日の合計</text></svg><div class="donut-legend"><div><span class="dot study"></span>勉強 \(formatTotal(s))（\(studyPct)%）</div><div><span class="dot brk"></span>休憩 \(formatTotal(b))（\(100 - studyPct)%）</div></div></div>
-            """
-        }()
-
-        // Heatmap: last 15 weeks (columns = weeks, rows = Mon..Sun)
         func levelClass(_ secs: Int) -> String {
             switch secs {
             case 0: return "l0"
@@ -325,24 +249,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             default: return "l4"
             }
         }
-        let heatHTML: String = {
-            let startMonday = cal.date(byAdding: .day, value: -14 * 7, to: thisWeekStart)!
-            var cells = ""
-            for col in 0...14 {
-                for row in 0..<7 {
-                    let day = cal.date(byAdding: .day, value: col * 7 + row, to: startMonday)!
-                    if day > todayStart {
-                        cells += "<div class=\"cell empty\"></div>"
-                    } else {
-                        let secs = dailyTotals[dateFormatter.string(from: day), default: 0]
-                        cells += "<div class=\"cell \(levelClass(secs))\" title=\"\(dayLabel.string(from: day)): \(formatTotal(secs))\"></div>"
-                    }
-                }
-            }
-            return "<div class=\"heat\">\(cells)</div><div class=\"heat-note\">少ない □ → ■ 多い（1マス＝1日）</div>"
-        }()
 
-        // This month calendar (Mon-start)
+        // This month calendar (Mon-start); each cell shows that day's study total
         let monthCalHTML: String = {
             let interval = cal.dateInterval(of: .month, for: now)!
             let first = interval.start
@@ -356,12 +264,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             for d in 1...dayCount {
                 let day = cal.date(byAdding: .day, value: d - 1, to: first)!
                 let secs = dailyTotals[dateFormatter.string(from: day), default: 0]
+                let brk = dailyBreakTotals[dateFormatter.string(from: day), default: 0]
                 let isToday = cal.isDateInToday(day)
                 let cls = "mcal-cell \(levelClass(secs))\(isToday ? " today" : "")"
-                let minLabel = secs > 0 ? "<div class=\"mcal-min\">\(formatTotal(secs))</div>" : ""
-                cells += "<div class=\"\(cls)\"><div class=\"mcal-day\">\(d)</div>\(minLabel)</div>"
+                var label = ""
+                if secs > 0 { label += "<div class=\"mcal-min\">勉強 \(formatTotal(secs))</div>" }
+                if brk > 0 { label += "<div class=\"mcal-min brk\">休憩 \(formatTotal(brk))</div>" }
+                cells += "<div class=\"\(cls)\"><div class=\"mcal-day\">\(d)</div>\(label)</div>"
             }
             return "<div class=\"mcal\">\(cells)</div>"
+        }()
+
+        // Monthly totals, newest first (up to 6 months that have any study)
+        let monthsHTML: String = {
+            var byMonth: [String: Int] = [:]
+            for (k, v) in dailyTotals { byMonth[String(k.prefix(7)), default: 0] += v }
+            let keys = byMonth.keys.sorted(by: >).prefix(6)
+            if keys.isEmpty { return "<div class=\"month-row\">まだ記録がありません</div>" }
+            var rows = ""
+            for k in keys {
+                let parts = k.split(separator: "-")
+                let label = "\(parts[0])年\(Int(parts[1])!)月"
+                rows += "<div class=\"month-row\"><span>\(label)</span><strong>\(formatTotal(byMonth[k]!))</strong></div>"
+            }
+            return rows
         }()
 
         let allTime = dailyTotals.values.reduce(0, +)
@@ -370,6 +296,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             f.calendar = Calendar(identifier: .gregorian)
             f.locale = Locale(identifier: "ja_JP")
             f.dateFormat = "yyyy年M月d日 HH:mm"
+            return f.string(from: now)
+        }()
+        let monthTitle: String = {
+            let f = DateFormatter()
+            f.calendar = Calendar(identifier: .gregorian)
+            f.locale = Locale(identifier: "ja_JP")
+            f.dateFormat = "yyyy年M月"
             return f.string(from: now)
         }()
 
@@ -383,39 +316,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
           body { font-family: -apple-system, "Hiragino Sans", sans-serif; margin: 24px; color: #1c1c1e; background: #f5f5f7; }
           h1 { font-size: 22px; margin: 0 0 4px; }
           .sub { color: #6e6e73; font-size: 13px; margin-bottom: 20px; }
-          .cards { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 24px; }
+          .cards { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 8px; }
           .card { background: #fff; border-radius: 12px; padding: 16px 20px; min-width: 140px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
           .card .k { font-size: 12px; color: #6e6e73; }
           .card .v { font-size: 28px; font-weight: 700; margin-top: 4px; }
           h2 { font-size: 16px; margin: 24px 0 10px; }
           .panel { background: #fff; border-radius: 12px; padding: 16px 20px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
-          .bar-row { display: flex; align-items: center; gap: 10px; margin: 6px 0; }
-          .bar-label { width: 86px; font-size: 12px; color: #3a3a3c; text-align: right; }
-          .bar-track { flex: 1; background: #e9e9ee; border-radius: 6px; height: 18px; overflow: hidden; }
-          .bar-fill { background: linear-gradient(90deg, #2bb3a3, #3a7bd5); height: 100%; border-radius: 6px; min-width: 2px; }
-          .bar-fill.week { background: linear-gradient(90deg, #f2a541, #e2603f); }
-          .bar-value { width: 64px; font-size: 12px; font-weight: 600; }
-          table { border-collapse: collapse; width: 100%; font-size: 13px; }
-          th, td { padding: 6px 8px; border-bottom: 1px solid #eee; text-align: left; }
-          th { color: #6e6e73; font-weight: 600; }
-          .donut-wrap { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
-          .donut-legend { font-size: 14px; line-height: 2; }
-          .dot { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 8px; }
-          .dot.study { background: #3a7bd5; }
-          .dot.brk { background: #f2a541; }
-          .heat { display: grid; grid-template-rows: repeat(7, 12px); grid-auto-flow: column; grid-auto-columns: 12px; gap: 3px; }
-          .cell { width: 12px; height: 12px; border-radius: 3px; }
-          .cell.empty { background: transparent; }
-          .cell.l0, .mcal-cell.l0 { background: #ebedf0; }
-          .cell.l1 { background: #9fd8cf; }
-          .cell.l2 { background: #4fb3a5; }
-          .cell.l3 { background: #2b8a7e; }
-          .cell.l4 { background: #14665a; }
-          .heat-note { font-size: 11px; color: #6e6e73; margin-top: 8px; }
           .mcal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
           .mcal-head { font-size: 11px; color: #6e6e73; text-align: center; padding: 2px 0; }
-          .mcal-cell { border-radius: 8px; min-height: 44px; padding: 5px 7px; }
+          .mcal-cell { border-radius: 8px; min-height: 52px; padding: 5px 7px; }
           .mcal-cell.blank { background: transparent; }
+          .mcal-cell.l0 { background: #ebedf0; }
           .mcal-cell.l1 { background: #d5f0ea; }
           .mcal-cell.l2 { background: #9fd8cf; }
           .mcal-cell.l3 { background: #4fb3a5; color: #fff; }
@@ -423,15 +334,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
           .mcal-cell.today { outline: 2px solid #3a7bd5; }
           .mcal-day { font-size: 12px; font-weight: 600; }
           .mcal-min { font-size: 11px; margin-top: 2px; }
+          .mcal-min.brk { opacity: .75; }
+          .month-row { display: flex; justify-content: space-between; padding: 8px 2px; border-bottom: 1px solid #eee; font-size: 14px; }
+          .month-row:last-child { border-bottom: none; }
           @media (prefers-color-scheme: dark) {
             body { background: #1c1c1e; color: #f5f5f7; }
             .card, .panel { background: #2c2c2e; }
-            .bar-track { background: #3a3a3c; }
-            .bar-label { color: #d1d1d6; }
-            th, td { border-bottom-color: #3a3a3c; }
-            .cell.l0, .mcal-cell.l0 { background: #3a3a3c; }
+            .mcal-cell.l0 { background: #3a3a3c; }
             .mcal-cell.l1 { background: #1f4d45; }
             .mcal-cell.l2 { background: #2b8a7e; }
+            .month-row { border-bottom-color: #3a3a3c; }
           }
         </style>
         </head>
@@ -445,19 +357,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
           <div class="card"><div class="k">今月の勉強</div><div class="v">\(formatTotal(totalForThisMonth()))</div></div>
           <div class="card"><div class="k">累計の勉強</div><div class="v">\(formatTotal(allTime))</div></div>
         </div>
-        <h2>今日の内訳（勉強 vs 休憩）</h2>
-        <div class="panel">\(donutHTML)</div>
-        <h2>直近15週のヒートマップ</h2>
-        <div class="panel">\(heatHTML)</div>
-        <h2>直近14日間の勉強</h2>
-        <div class="panel">\(barsHTML)</div>
-        <h2>週ごと（直近8週）</h2>
-        <div class="panel">\(weeksHTML)</div>
-        <h2>今月のカレンダー</h2>
+        <h2>\(monthTitle) のカレンダー</h2>
         <div class="panel">\(monthCalHTML)</div>
-        <h2>日ごとの内訳（新しい順）</h2>
-        <div class="panel"><table><tr><th>日付</th><th>勉強</th><th>休憩</th></tr>
-        \(rowsHTML)</table></div>
+        <h2>月ごとの勉強合計</h2>
+        <div class="panel">\(monthsHTML)</div>
         </body>
         </html>
         """
@@ -562,5 +465,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 let delegate = AppDelegate()
 NSApplication.shared.delegate = delegate
-NSApplication.shared.setActivationPolicy(.accessory)
+NSApplication.shared.setActivationPolicy(.regular)
 NSApplication.shared.run()
