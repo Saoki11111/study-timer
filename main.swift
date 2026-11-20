@@ -3,6 +3,7 @@
 // Right click: menu (Study & Break totals, Reset, Stop, Quit)
 // No window, no Dock icon, no double-click reset.
 import Cocoa
+import ServiceManagement
 
 struct Persisted: Codable {
     var elapsed: Int = 0                 // study stopwatch (seconds)
@@ -200,6 +201,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         clearItem.target = self
         menu.addItem(clearItem)
 
+        let loginItem = NSMenuItem(title: "Start at Login", action: #selector(menuToggleLogin), keyEquivalent: "")
+        loginItem.target = self
+        if #available(macOS 13.0, *) {
+            loginItem.state = (SMAppService.mainApp.status == .enabled) ? .on : .off
+        }
+        menu.addItem(loginItem)
+
+        menu.addItem(.separator())
+
         let quitItem = NSMenuItem(title: "Quit StudyTimer", action: #selector(menuQuit), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
@@ -286,6 +296,74 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             """
         }
 
+        // Donut: today's study vs break
+        let donutHTML: String = {
+            let s = totalForToday()
+            let b = breakTotalForToday()
+            let total = s + b
+            let circ = 339.292 // 2 * pi * 54
+            if total == 0 {
+                return """
+                <div class="donut-wrap"><svg width="180" height="180" viewBox="0 0 180 180"><circle cx="90" cy="90" r="54" fill="none" stroke="#e9e9ee" stroke-width="22"/></svg><div class="donut-legend"><div>今日はまだ記録がありません</div></div></div>
+                """
+            }
+            let frac = Double(s) / Double(total)
+            let studyLen = frac * circ
+            let studyPct = Int((frac * 100).rounded())
+            return """
+            <div class="donut-wrap"><svg width="180" height="180" viewBox="0 0 180 180"><circle cx="90" cy="90" r="54" fill="none" stroke="#f2a541" stroke-width="22"/><circle cx="90" cy="90" r="54" fill="none" stroke="#3a7bd5" stroke-width="22" stroke-dasharray="\(studyLen) \(circ)" transform="rotate(-90 90 90)"/><text x="90" y="86" text-anchor="middle" font-size="20" font-weight="700" fill="currentColor">\(formatTotal(total))</text><text x="90" y="108" text-anchor="middle" font-size="11" fill="#888">今日の合計</text></svg><div class="donut-legend"><div><span class="dot study"></span>勉強 \(formatTotal(s))（\(studyPct)%）</div><div><span class="dot brk"></span>休憩 \(formatTotal(b))（\(100 - studyPct)%）</div></div></div>
+            """
+        }()
+
+        // Heatmap: last 15 weeks (columns = weeks, rows = Mon..Sun)
+        func levelClass(_ secs: Int) -> String {
+            switch secs {
+            case 0: return "l0"
+            case ..<1800: return "l1"
+            case ..<3600: return "l2"
+            case ..<7200: return "l3"
+            default: return "l4"
+            }
+        }
+        let heatHTML: String = {
+            let startMonday = cal.date(byAdding: .day, value: -14 * 7, to: thisWeekStart)!
+            var cells = ""
+            for col in 0...14 {
+                for row in 0..<7 {
+                    let day = cal.date(byAdding: .day, value: col * 7 + row, to: startMonday)!
+                    if day > todayStart {
+                        cells += "<div class=\"cell empty\"></div>"
+                    } else {
+                        let secs = dailyTotals[dateFormatter.string(from: day), default: 0]
+                        cells += "<div class=\"cell \(levelClass(secs))\" title=\"\(dayLabel.string(from: day)): \(formatTotal(secs))\"></div>"
+                    }
+                }
+            }
+            return "<div class=\"heat\">\(cells)</div><div class=\"heat-note\">少ない □ → ■ 多い（1マス＝1日）</div>"
+        }()
+
+        // This month calendar (Mon-start)
+        let monthCalHTML: String = {
+            let interval = cal.dateInterval(of: .month, for: now)!
+            let first = interval.start
+            let dayCount = cal.range(of: .day, in: .month, for: now)!.count
+            let firstOffset = (cal.component(.weekday, from: first) + 5) % 7 // Mon=0
+            var cells = ""
+            for name in ["月", "火", "水", "木", "金", "土", "日"] {
+                cells += "<div class=\"mcal-head\">\(name)</div>"
+            }
+            for _ in 0..<firstOffset { cells += "<div class=\"mcal-cell blank\"></div>" }
+            for d in 1...dayCount {
+                let day = cal.date(byAdding: .day, value: d - 1, to: first)!
+                let secs = dailyTotals[dateFormatter.string(from: day), default: 0]
+                let isToday = cal.isDateInToday(day)
+                let cls = "mcal-cell \(levelClass(secs))\(isToday ? " today" : "")"
+                let minLabel = secs > 0 ? "<div class=\"mcal-min\">\(formatTotal(secs))</div>" : ""
+                cells += "<div class=\"\(cls)\"><div class=\"mcal-day\">\(d)</div>\(minLabel)</div>"
+            }
+            return "<div class=\"mcal\">\(cells)</div>"
+        }()
+
         let allTime = dailyTotals.values.reduce(0, +)
         let nowLabel: String = {
             let f = DateFormatter()
@@ -320,12 +398,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
           table { border-collapse: collapse; width: 100%; font-size: 13px; }
           th, td { padding: 6px 8px; border-bottom: 1px solid #eee; text-align: left; }
           th { color: #6e6e73; font-weight: 600; }
+          .donut-wrap { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
+          .donut-legend { font-size: 14px; line-height: 2; }
+          .dot { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 8px; }
+          .dot.study { background: #3a7bd5; }
+          .dot.brk { background: #f2a541; }
+          .heat { display: grid; grid-template-rows: repeat(7, 12px); grid-auto-flow: column; grid-auto-columns: 12px; gap: 3px; }
+          .cell { width: 12px; height: 12px; border-radius: 3px; }
+          .cell.empty { background: transparent; }
+          .cell.l0, .mcal-cell.l0 { background: #ebedf0; }
+          .cell.l1 { background: #9fd8cf; }
+          .cell.l2 { background: #4fb3a5; }
+          .cell.l3 { background: #2b8a7e; }
+          .cell.l4 { background: #14665a; }
+          .heat-note { font-size: 11px; color: #6e6e73; margin-top: 8px; }
+          .mcal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+          .mcal-head { font-size: 11px; color: #6e6e73; text-align: center; padding: 2px 0; }
+          .mcal-cell { border-radius: 8px; min-height: 44px; padding: 5px 7px; }
+          .mcal-cell.blank { background: transparent; }
+          .mcal-cell.l1 { background: #d5f0ea; }
+          .mcal-cell.l2 { background: #9fd8cf; }
+          .mcal-cell.l3 { background: #4fb3a5; color: #fff; }
+          .mcal-cell.l4 { background: #14665a; color: #fff; }
+          .mcal-cell.today { outline: 2px solid #3a7bd5; }
+          .mcal-day { font-size: 12px; font-weight: 600; }
+          .mcal-min { font-size: 11px; margin-top: 2px; }
           @media (prefers-color-scheme: dark) {
             body { background: #1c1c1e; color: #f5f5f7; }
             .card, .panel { background: #2c2c2e; }
             .bar-track { background: #3a3a3c; }
             .bar-label { color: #d1d1d6; }
             th, td { border-bottom-color: #3a3a3c; }
+            .cell.l0, .mcal-cell.l0 { background: #3a3a3c; }
+            .mcal-cell.l1 { background: #1f4d45; }
+            .mcal-cell.l2 { background: #2b8a7e; }
           }
         </style>
         </head>
@@ -339,10 +445,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
           <div class="card"><div class="k">今月の勉強</div><div class="v">\(formatTotal(totalForThisMonth()))</div></div>
           <div class="card"><div class="k">累計の勉強</div><div class="v">\(formatTotal(allTime))</div></div>
         </div>
+        <h2>今日の内訳（勉強 vs 休憩）</h2>
+        <div class="panel">\(donutHTML)</div>
+        <h2>直近15週のヒートマップ</h2>
+        <div class="panel">\(heatHTML)</div>
         <h2>直近14日間の勉強</h2>
         <div class="panel">\(barsHTML)</div>
         <h2>週ごと（直近8週）</h2>
         <div class="panel">\(weeksHTML)</div>
+        <h2>今月のカレンダー</h2>
+        <div class="panel">\(monthCalHTML)</div>
         <h2>日ごとの内訳（新しい順）</h2>
         <div class="panel"><table><tr><th>日付</th><th>勉強</th><th>休憩</th></tr>
         \(rowsHTML)</table></div>
@@ -381,6 +493,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func menuQuit() {
         save()
         NSApp.terminate(nil)
+    }
+
+    @objc private func menuToggleLogin() {
+        guard #available(macOS 13.0, *) else { return }
+        do {
+            if SMAppService.mainApp.status == .enabled {
+                try SMAppService.mainApp.unregister()
+            } else {
+                try SMAppService.mainApp.register()
+            }
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Could not change the login setting."
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+        }
     }
 
     // MARK: - Totals
