@@ -4,7 +4,8 @@
 
 - 左クリック：勉強開始 → 休憩に切り替え（休憩タイマーが0から数え始める）→ 勉強に戻る
 - メニューバー表示：勉強中は `▶ 12:34`、休憩中は `☕ 05:32`、両方止めているときは `❚❚ 12:34`
-- 右クリック：メニュー（Study Today / Break Today / Study This Week〈月曜始まり〉/ Study This Month、Stop Both Timers、Reset Timer、Quit）
+- 右クリック：メニュー（Study Today / Break Today / Study This Week〈月曜始まり〉/ Study This Month、Open Report、Stop Both Timers、Reset Timer、Quit）
+- Open Report：Mac 内だけでグラフ付きレポート（HTML）を生成してブラウザで開く。ネットには送信しない
 - ダブルクリックではリセットしない。ウィンドウも枠線もDockアイコンもなし
 - 合計は1秒ごとに Mac 内に保存（`~/Library/Application Support/StudyTimer/data.json`）。アカウント不要
 

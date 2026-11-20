@@ -169,6 +169,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
+        let reportItem = NSMenuItem(title: "Open Report…", action: #selector(menuOpenReport), keyEquivalent: "")
+        reportItem.target = self
+        menu.addItem(reportItem)
+
+        menu.addItem(.separator())
+
         let switchTitle: String
         switch mode {
         case .stopped: switchTitle = "Start Study"
@@ -201,6 +207,148 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.menu = menu
         statusItem.button?.performClick(nil)
         statusItem.menu = nil
+    }
+
+    // MARK: - Report (local HTML, never uploaded anywhere)
+    @objc private func menuOpenReport() {
+        save()
+        let html = generateReportHTML()
+        let url = storageURL.deletingLastPathComponent().appendingPathComponent("report.html")
+        do {
+            try html.write(to: url, atomically: true, encoding: .utf8)
+            NSWorkspace.shared.open(url)
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Could not create the report."
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+        }
+    }
+
+    private func generateReportHTML() -> String {
+        var cal = Calendar(identifier: .gregorian)
+        cal.firstWeekday = 2 // Monday
+        let now = Date()
+        let todayStart = cal.startOfDay(for: now)
+
+        let dayLabel: DateFormatter = {
+            let f = DateFormatter()
+            f.calendar = Calendar(identifier: .gregorian)
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.dateFormat = "M/d"
+            return f
+        }()
+        let weekdayNames = ["日", "月", "火", "水", "木", "金", "土"] // index: weekday-1 (1=Sun)
+
+        // Last 14 days, oldest first
+        var days: [(label: String, study: Int, brk: Int)] = []
+        for i in stride(from: 13, through: 0, by: -1) {
+            let day = cal.date(byAdding: .day, value: -i, to: todayStart)!
+            let key = dateFormatter.string(from: day)
+            let wd = cal.component(.weekday, from: day)
+            days.append((label: "\(dayLabel.string(from: day)) (\(weekdayNames[wd - 1]))",
+                         study: dailyTotals[key, default: 0],
+                         brk: dailyBreakTotals[key, default: 0]))
+        }
+        let maxStudy = max(days.map { $0.study }.max() ?? 0, 1)
+
+        var barsHTML = ""
+        for d in days {
+            let pct = Int((Double(d.study) / Double(maxStudy) * 100).rounded())
+            barsHTML += """
+            <div class="bar-row"><span class="bar-label">\(d.label)</span><div class="bar-track"><div class="bar-fill" style="width:\(pct)%"></div></div><span class="bar-value">\(formatTotal(d.study))</span></div>
+            """
+        }
+
+        var rowsHTML = ""
+        for d in days.reversed() {
+            rowsHTML += "<tr><td>\(d.label)</td><td>\(formatTotal(d.study))</td><td>\(formatTotal(d.brk))</td></tr>\n"
+        }
+
+        // Last 8 weeks (Monday start), oldest first
+        let thisWeekStart = cal.dateInterval(of: .weekOfYear, for: now)!.start
+        var weeks: [(label: String, study: Int)] = []
+        for w in stride(from: 7, through: 0, by: -1) {
+            let start = cal.date(byAdding: .day, value: -7 * w, to: thisWeekStart)!
+            var sum = 0
+            for d in 0..<7 {
+                let day = cal.date(byAdding: .day, value: d, to: start)!
+                sum += dailyTotals[dateFormatter.string(from: day), default: 0]
+            }
+            weeks.append((label: "\(dayLabel.string(from: start))〜", study: sum))
+        }
+        let maxWeek = max(weeks.map { $0.study }.max() ?? 0, 1)
+        var weeksHTML = ""
+        for wk in weeks {
+            let pct = Int((Double(wk.study) / Double(maxWeek) * 100).rounded())
+            weeksHTML += """
+            <div class="bar-row"><span class="bar-label">\(wk.label)</span><div class="bar-track"><div class="bar-fill week" style="width:\(pct)%"></div></div><span class="bar-value">\(formatTotal(wk.study))</span></div>
+            """
+        }
+
+        let allTime = dailyTotals.values.reduce(0, +)
+        let nowLabel: String = {
+            let f = DateFormatter()
+            f.calendar = Calendar(identifier: .gregorian)
+            f.locale = Locale(identifier: "ja_JP")
+            f.dateFormat = "yyyy年M月d日 HH:mm"
+            return f.string(from: now)
+        }()
+
+        return """
+        <!DOCTYPE html>
+        <html lang="ja">
+        <head>
+        <meta charset="utf-8">
+        <title>StudyTimer レポート</title>
+        <style>
+          body { font-family: -apple-system, "Hiragino Sans", sans-serif; margin: 24px; color: #1c1c1e; background: #f5f5f7; }
+          h1 { font-size: 22px; margin: 0 0 4px; }
+          .sub { color: #6e6e73; font-size: 13px; margin-bottom: 20px; }
+          .cards { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 24px; }
+          .card { background: #fff; border-radius: 12px; padding: 16px 20px; min-width: 140px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+          .card .k { font-size: 12px; color: #6e6e73; }
+          .card .v { font-size: 28px; font-weight: 700; margin-top: 4px; }
+          h2 { font-size: 16px; margin: 24px 0 10px; }
+          .panel { background: #fff; border-radius: 12px; padding: 16px 20px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+          .bar-row { display: flex; align-items: center; gap: 10px; margin: 6px 0; }
+          .bar-label { width: 86px; font-size: 12px; color: #3a3a3c; text-align: right; }
+          .bar-track { flex: 1; background: #e9e9ee; border-radius: 6px; height: 18px; overflow: hidden; }
+          .bar-fill { background: linear-gradient(90deg, #2bb3a3, #3a7bd5); height: 100%; border-radius: 6px; min-width: 2px; }
+          .bar-fill.week { background: linear-gradient(90deg, #f2a541, #e2603f); }
+          .bar-value { width: 64px; font-size: 12px; font-weight: 600; }
+          table { border-collapse: collapse; width: 100%; font-size: 13px; }
+          th, td { padding: 6px 8px; border-bottom: 1px solid #eee; text-align: left; }
+          th { color: #6e6e73; font-weight: 600; }
+          @media (prefers-color-scheme: dark) {
+            body { background: #1c1c1e; color: #f5f5f7; }
+            .card, .panel { background: #2c2c2e; }
+            .bar-track { background: #3a3a3c; }
+            .bar-label { color: #d1d1d6; }
+            th, td { border-bottom-color: #3a3a3c; }
+          }
+        </style>
+        </head>
+        <body>
+        <h1>📚 StudyTimer レポート</h1>
+        <div class="sub">\(nowLabel) 時点 ・ このファイルはあなたの Mac の中だけで作られています</div>
+        <div class="cards">
+          <div class="card"><div class="k">今日の勉強</div><div class="v">\(formatTotal(totalForToday()))</div></div>
+          <div class="card"><div class="k">今日の休憩</div><div class="v">\(formatTotal(breakTotalForToday()))</div></div>
+          <div class="card"><div class="k">今週の勉強</div><div class="v">\(formatTotal(totalForThisWeek()))</div></div>
+          <div class="card"><div class="k">今月の勉強</div><div class="v">\(formatTotal(totalForThisMonth()))</div></div>
+          <div class="card"><div class="k">累計の勉強</div><div class="v">\(formatTotal(allTime))</div></div>
+        </div>
+        <h2>直近14日間の勉強</h2>
+        <div class="panel">\(barsHTML)</div>
+        <h2>週ごと（直近8週）</h2>
+        <div class="panel">\(weeksHTML)</div>
+        <h2>日ごとの内訳（新しい順）</h2>
+        <div class="panel"><table><tr><th>日付</th><th>勉強</th><th>休憩</th></tr>
+        \(rowsHTML)</table></div>
+        </body>
+        </html>
+        """
     }
 
     @objc private func menuAdvance() { advanceMode() }
