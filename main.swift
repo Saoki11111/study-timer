@@ -1,12 +1,12 @@
 // StudyTimer - simple menu bar stopwatch for studying, with a break timer
 // Left click: start study / switch to break / switch back to study
-// Right click: menu (Study & Break totals, Reset, Stop, Quit)
+// Right click: menu (Study & Break totals, Open Report, Stop, Start at Login, Quit)
 // No window (menu bar + Dock icon for easy relaunch), no double-click reset.
 import Cocoa
 import ServiceManagement
 
 struct Persisted: Codable {
-    var elapsed: Int = 0                 // study stopwatch (seconds)
+    var elapsed: Int = 0                 // legacy field (unused; kept so old data files still load)
     var dailyTotals: [String: Int] = [:] // "yyyy-MM-dd" -> study seconds
     var breakElapsed: Int = 0            // current break (seconds)
     var dailyBreakTotals: [String: Int] = [:] // "yyyy-MM-dd" -> break seconds
@@ -33,7 +33,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var timer: Timer?
     private var mode: Mode = .stopped
-    private var elapsed = 0
     private var dailyTotals: [String: Int] = [:]
     private var breakElapsed = 0
     private var dailyBreakTotals: [String: Int] = [:]
@@ -58,14 +57,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func load() {
         guard let data = try? Data(contentsOf: storageURL),
               let saved = try? JSONDecoder().decode(Persisted.self, from: data) else { return }
-        elapsed = saved.elapsed
         dailyTotals = saved.dailyTotals
         breakElapsed = saved.breakElapsed
         dailyBreakTotals = saved.dailyBreakTotals
     }
 
     private func save() {
-        let data = Persisted(elapsed: elapsed, dailyTotals: dailyTotals, breakElapsed: breakElapsed, dailyBreakTotals: dailyBreakTotals)
+        let data = Persisted(elapsed: 0, dailyTotals: dailyTotals, breakElapsed: breakElapsed, dailyBreakTotals: dailyBreakTotals)
         if let encoded = try? JSONEncoder().encode(data) {
             try? encoded.write(to: storageURL, options: [.atomic])
         }
@@ -130,7 +128,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let self else { return }
                 let key = self.dateFormatter.string(from: Date())
                 if self.mode == .studying {
-                    self.elapsed += 1
                     self.dailyTotals[key, default: 0] += 1
                 } else if self.mode == .breaking {
                     self.breakElapsed += 1
@@ -146,11 +143,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func updateTitle() {
         switch mode {
         case .studying:
-            statusItem?.button?.title = "▶ " + formatClock(elapsed)
+            statusItem?.button?.title = "▶ " + formatClock(totalForToday())
         case .breaking:
             statusItem?.button?.title = "☕ " + formatClock(breakElapsed)
         case .stopped:
-            statusItem?.button?.title = "❚❚ " + formatClock(elapsed)
+            statusItem?.button?.title = "❚❚ " + formatClock(totalForToday())
         }
     }
 
@@ -191,15 +188,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stopItem.isEnabled = (mode != .stopped)
         menu.addItem(stopItem)
 
-        let resetItem = NSMenuItem(title: "Reset Timer", action: #selector(menuReset), keyEquivalent: "")
-        resetItem.target = self
-        menu.addItem(resetItem)
-
         menu.addItem(.separator())
-
-        let clearItem = NSMenuItem(title: "Clear History (Study/Break totals)…", action: #selector(menuClearHistory), keyEquivalent: "")
-        clearItem.target = self
-        menu.addItem(clearItem)
 
         let loginItem = NSMenuItem(title: "Start at Login", action: #selector(menuToggleLogin), keyEquivalent: "")
         loginItem.target = self
@@ -368,30 +357,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func menuAdvance() { advanceMode() }
     @objc private func menuStop() { stopBoth() }
-
-    @objc private func menuReset() {
-        // Reset the stopwatches only. Daily totals are NOT erased.
-        mode = .stopped
-        syncTimer()
-        elapsed = 0
-        breakElapsed = 0
-        save()
-        updateTitle()
-    }
-
-    @objc private func menuClearHistory() {
-        let alert = NSAlert()
-        alert.messageText = "Clear all history?"
-        alert.informativeText = "Study and break totals (Today / Week / Month) will be set to 0."
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Clear")
-        alert.addButton(withTitle: "Cancel")
-        if alert.runModal() == .alertFirstButtonReturn {
-            dailyTotals = [:]
-            dailyBreakTotals = [:]
-            save()
-        }
-    }
 
     @objc private func menuQuit() {
         save()

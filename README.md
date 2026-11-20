@@ -2,9 +2,9 @@
 
 勉強用の、Macのメニューバー専用ストップウォッチ。M1/M2/M3・Intel 両対応の想定（ビルドしたMacのアーキテクチャで生成）。
 
-- 左クリック：勉強開始 → 休憩に切り替え（休憩タイマーが0から数え始める）→ 勉強に戻る
+- 左クリック：勉強開始 → 休憩に切り替え（休憩タイマーが0から数え始める）→ 勉強に戻る。勉強の表示は「今日の勉強時間」で、日付が変われば自動で0から（手動リセットなし）
 - メニューバー表示：勉強中は `▶ 12:34`、休憩中は `☕ 05:32`、両方止めているときは `❚❚ 12:34`
-- 右クリック：メニュー（Study Today / Break Today / Study This Week〈月曜始まり〉/ Study This Month、Open Report、Stop Both Timers、Reset Timer、Quit）
+- 右クリック：メニュー（Study Today / Break Today / Study This Week〈月曜始まり〉/ Study This Month、Open Report、Stop Both Timers、Quit）
 - Open Report：Mac 内だけでレポート（HTML）を生成してブラウザで開く。内容は、今日・今週・今月・累計のカード、今月のカレンダー（各日に勉強・休憩の時間入り）、月ごとの合計リストのみ。ネットには送信しない
 - 右クリックメニューの Start at Login：ログイン時の自動起動をオン/オフできる
 - ウィンドウは出ないが、Dock にはアイコンが出る（落ちたときの再起動を Dock の1クリックでできるように）
