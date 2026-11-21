@@ -1,9 +1,8 @@
 // StudyTimer - simple menu bar stopwatch for studying, with a break timer
 // Left click: start study / switch to break / switch back to study
-// Right click: menu (Study & Break totals, Open Report, Stop, Start at Login, Quit)
+// Right click: menu (Study & Break totals, Open Report, Stop, Quit)
 // No window (menu bar + Dock icon for easy relaunch), no double-click reset.
 import Cocoa
-import ServiceManagement
 
 struct Persisted: Codable {
     var elapsed: Int = 0                 // legacy field (unused; kept so old data files still load)
@@ -190,15 +189,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
-        let loginItem = NSMenuItem(title: "Start at Login", action: #selector(menuToggleLogin), keyEquivalent: "")
-        loginItem.target = self
-        if #available(macOS 13.0, *) {
-            loginItem.state = (SMAppService.mainApp.status == .enabled) ? .on : .off
-        }
-        menu.addItem(loginItem)
-
-        menu.addItem(.separator())
-
         let quitItem = NSMenuItem(title: "Quit StudyTimer", action: #selector(menuQuit), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
@@ -371,6 +361,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
           .mcal-day { font-size: 12px; font-weight: 600; }
           .mcal-min { font-size: 11px; margin-top: 2px; }
           .mcal-min.brk { opacity: .75; }
+          .row2 { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 24px; }
+          .row2 .panel { flex: 1 1 330px; }
+          .row2 h3 { font-size: 14px; margin: 0 0 12px; }
           .donut-wrap { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
           .donut-legend { font-size: 14px; line-height: 2; }
           .dot { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 8px; }
@@ -408,10 +401,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
           <div class="card"><div class="k">今月の勉強</div><div class="v">\(formatTotal(totalForThisMonth()))</div></div>
           <div class="card"><div class="k">累計の勉強</div><div class="v">\(formatTotal(allTime))</div></div>
         </div>
-        <h2>今日の内訳（勉強 vs 休憩）</h2>
-        <div class="panel">\(donutHTML)</div>
-        <h2>直近15週のヒートマップ</h2>
-        <div class="panel">\(heatHTML)</div>
+        <div class="row2">
+          <div class="panel"><h3>今日の内訳（勉強 vs 休憩）</h3>\(donutHTML)</div>
+          <div class="panel"><h3>直近15週のヒートマップ</h3>\(heatHTML)</div>
+        </div>
         <h2>\(monthTitle) のカレンダー</h2>
         <div class="panel">\(monthCalHTML)</div>
         <h2>月ごとの勉強合計</h2>
@@ -427,22 +420,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func menuQuit() {
         save()
         NSApp.terminate(nil)
-    }
-
-    @objc private func menuToggleLogin() {
-        guard #available(macOS 13.0, *) else { return }
-        do {
-            if SMAppService.mainApp.status == .enabled {
-                try SMAppService.mainApp.unregister()
-            } else {
-                try SMAppService.mainApp.register()
-            }
-        } catch {
-            let alert = NSAlert()
-            alert.messageText = "Could not change the login setting."
-            alert.informativeText = error.localizedDescription
-            alert.runModal()
-        }
     }
 
     // MARK: - Totals
