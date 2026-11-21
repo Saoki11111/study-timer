@@ -239,6 +239,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        let dayLabel: DateFormatter = {
+            let f = DateFormatter()
+            f.calendar = Calendar(identifier: .gregorian)
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.dateFormat = "M/d"
+            return f
+        }()
+        let todayStart = cal.startOfDay(for: now)
+        let thisWeekStart = cal.dateInterval(of: .weekOfYear, for: now)!.start
+
+        // Donut: today's study vs break
+        let donutHTML: String = {
+            let s = totalForToday()
+            let b = breakTotalForToday()
+            let total = s + b
+            let circ = 339.292 // 2 * pi * 54
+            if total == 0 {
+                return """
+                <div class="donut-wrap"><svg width="180" height="180" viewBox="0 0 180 180"><circle cx="90" cy="90" r="54" fill="none" stroke="#e9e9ee" stroke-width="22"/></svg><div class="donut-legend"><div>今日はまだ記録がありません</div></div></div>
+                """
+            }
+            let frac = Double(s) / Double(total)
+            let studyLen = frac * circ
+            let studyPct = Int((frac * 100).rounded())
+            return """
+            <div class="donut-wrap"><svg width="180" height="180" viewBox="0 0 180 180"><circle cx="90" cy="90" r="54" fill="none" stroke="#f2a541" stroke-width="22"/><circle cx="90" cy="90" r="54" fill="none" stroke="#3a7bd5" stroke-width="22" stroke-dasharray="\(studyLen) \(circ)" transform="rotate(-90 90 90)"/><text x="90" y="86" text-anchor="middle" font-size="20" font-weight="700" fill="currentColor">\(formatTotal(total))</text><text x="90" y="108" text-anchor="middle" font-size="11" fill="#888">今日の合計</text></svg><div class="donut-legend"><div><span class="dot study"></span>勉強 \(formatTotal(s))（\(studyPct)%）</div><div><span class="dot brk"></span>休憩 \(formatTotal(b))（\(100 - studyPct)%）</div></div></div>
+            """
+        }()
+
+        // Heatmap: last 15 weeks (columns = weeks, rows = Mon..Sun)
+        let heatHTML: String = {
+            let startMonday = cal.date(byAdding: .day, value: -14 * 7, to: thisWeekStart)!
+            var cells = ""
+            for col in 0...14 {
+                for row in 0..<7 {
+                    let day = cal.date(byAdding: .day, value: col * 7 + row, to: startMonday)!
+                    if day > todayStart {
+                        cells += "<div class=\"cell empty\"></div>"
+                    } else {
+                        let secs = dailyTotals[dateFormatter.string(from: day), default: 0]
+                        cells += "<div class=\"cell \(levelClass(secs))\" title=\"\(dayLabel.string(from: day)): \(formatTotal(secs))\"></div>"
+                    }
+                }
+            }
+            return "<div class=\"heat\">\(cells)</div><div class=\"heat-note\">少ない □ → ■ 多い（1マス＝1日）</div>"
+        }()
+
         // This month calendar (Mon-start); each cell shows that day's study total
         let monthCalHTML: String = {
             let interval = cal.dateInterval(of: .month, for: now)!
@@ -324,12 +371,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
           .mcal-day { font-size: 12px; font-weight: 600; }
           .mcal-min { font-size: 11px; margin-top: 2px; }
           .mcal-min.brk { opacity: .75; }
+          .donut-wrap { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
+          .donut-legend { font-size: 14px; line-height: 2; }
+          .dot { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 8px; }
+          .dot.study { background: #3a7bd5; }
+          .dot.brk { background: #f2a541; }
+          .heat { display: grid; grid-template-rows: repeat(7, 12px); grid-auto-flow: column; grid-auto-columns: 12px; gap: 3px; }
+          .cell { width: 12px; height: 12px; border-radius: 3px; }
+          .cell.empty { background: transparent; }
+          .cell.l0 { background: #ebedf0; }
+          .cell.l1 { background: #9fd8cf; }
+          .cell.l2 { background: #4fb3a5; }
+          .cell.l3 { background: #2b8a7e; }
+          .cell.l4 { background: #14665a; }
+          .heat-note { font-size: 11px; color: #6e6e73; margin-top: 8px; }
           .month-row { display: flex; justify-content: space-between; padding: 8px 2px; border-bottom: 1px solid #eee; font-size: 14px; }
           .month-row:last-child { border-bottom: none; }
           @media (prefers-color-scheme: dark) {
             body { background: #1c1c1e; color: #f5f5f7; }
             .card, .panel { background: #2c2c2e; }
             .mcal-cell.l0 { background: #3a3a3c; }
+            .cell.l0 { background: #3a3a3c; }
             .mcal-cell.l1 { background: #1f4d45; }
             .mcal-cell.l2 { background: #2b8a7e; }
             .month-row { border-bottom-color: #3a3a3c; }
@@ -346,6 +408,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
           <div class="card"><div class="k">今月の勉強</div><div class="v">\(formatTotal(totalForThisMonth()))</div></div>
           <div class="card"><div class="k">累計の勉強</div><div class="v">\(formatTotal(allTime))</div></div>
         </div>
+        <h2>今日の内訳（勉強 vs 休憩）</h2>
+        <div class="panel">\(donutHTML)</div>
+        <h2>直近15週のヒートマップ</h2>
+        <div class="panel">\(heatHTML)</div>
         <h2>\(monthTitle) のカレンダー</h2>
         <div class="panel">\(monthCalHTML)</div>
         <h2>月ごとの勉強合計</h2>
